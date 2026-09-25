@@ -27,6 +27,7 @@
         <button id="btn-change-impact" class="btn btn-accent">🧯 变更影响预演</button>
         <button id="btn-verified-chain" class="btn">✅ 已核实交接链</button>
         <button id="btn-signoff-plan" class="btn btn-accent">🧩 跨道具补签计划</button>
+        <button id="btn-away-timeout" class="btn btn-accent">⏱ 连续离仓超时排查</button>
         <button id="btn-reverify" class="btn" title="重新读取记录并按时间重放">↻ 重新核验</button>
       </div>
     </div>
@@ -160,6 +161,30 @@
       </div>
       <div id="splan-conflicts" class="splan-conflicts"></div>
       <div class="splan-readonly">计划只读：不会自动签收或修改任何记录；点击待签记录完成实际签收后，请重新计算计划。</div>
+    </section>
+
+    <!-- 道具连续离仓超时排查结果（查询后即时展示，只读、不改写记录或签收） -->
+    <section id="away-panel" class="panel panel-away hidden">
+      <div class="panel-head away-head">
+        <h2>⏱ 连续离仓超时排查 · 截止第 <span id="away-minute-label">-</span> 分钟（含）· 允许离仓 <span id="away-threshold-label">-</span> 分钟（等于阈值不算超时）</h2>
+        <button type="button" class="btn btn-sm" id="btn-away-close" title="关闭排查结果">✕ 关闭</button>
+      </div>
+      <div class="inv-summary" id="away-summary"></div>
+      <div class="resp-section-title">超过阈值的离仓区间</div>
+      <div class="table-wrap">
+        <table class="table" id="away-table">
+          <thead>
+            <tr>
+              <th class="col-rowno">#</th><th>道具</th><th>结论</th><th>离仓起始</th><th>区间止点</th>
+              <th>时长（分钟）</th><th>关联交接记录</th><th>说明</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="away-undeterminable" class="resp-und"></div>
+      <div id="away-conflicts" class="splan-conflicts"></div>
+      <div class="splan-readonly">排查只读：按同分钟唯一交接链逐件重放截止时刻内的记录，不会修改任何交接记录或签收。</div>
     </section>
 
     <!-- 交接记录变更影响预演结果（只读模拟，不写入记录或签收） -->
@@ -562,6 +587,35 @@
       <div class="dialog-actions">
         <button type="button" class="btn" data-close>取消</button>
         <button type="submit" class="btn btn-primary">生成补签计划</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 道具连续离仓超时排查查询弹窗 -->
+  <dialog id="away-dialog" class="dialog">
+    <form method="dialog" id="away-form">
+      <h3>道具连续离仓超时排查</h3>
+      <p class="dialog-tip">
+        输入<strong>截止分钟（含）</strong>与<strong>允许离仓分钟数</strong>：系统按现有
+        <strong>同分钟唯一交接链</strong>逐件重放截止时刻内的记录，把每次<strong>从仓库交出至重新入仓</strong>
+        视为一个离仓区间（半开区间 [起始, 止点)，时长 = 止点 − 起始）。同分钟多次转手只按该分钟交接完成后
+        <strong>最终是否在仓</strong>判断；未归仓区间截至查询时刻。时长<strong>严格超过</strong>阈值才列为超时
+        （等于阈值不算）。遇交接链冲突时只保留冲突前可确定的区间——此前已越过阈值仍列为确定超时，
+        冲突后的时长标为无法判定。查询只读，不改写任何记录或签收。
+      </p>
+      <div class="field-row">
+        <label class="field">
+          <span>截止分钟（含） <em>*</em></span>
+          <input type="number" id="away-minute" min="0" step="1" required placeholder="如 30" />
+        </label>
+        <label class="field">
+          <span>允许离仓分钟数 <em>*</em></span>
+          <input type="number" id="away-threshold" min="0" step="1" required placeholder="如 10" />
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn btn-primary">开始排查</button>
       </div>
     </form>
   </dialog>

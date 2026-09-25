@@ -624,6 +624,13 @@ main .btn:hover { background: var(--muted-bg); color: var(--ink); }
   font-size: 13px;
 }
 
+/* ---------- 道具连续离仓超时排查 ---------- */
+.panel-away { margin-bottom: 16px; }
+.away-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.away-head h2 span { color: var(--brand); }
+.away-records { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; }
+.away-rec a { cursor: pointer; }
+
 /* ---------- 交接记录变更影响预演 ---------- */
 .panel-impact { margin-bottom: 16px; }
 .impact-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

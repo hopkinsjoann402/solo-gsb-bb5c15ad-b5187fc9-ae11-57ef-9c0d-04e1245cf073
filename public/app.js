@@ -136,6 +136,20 @@ const els = {
   splanPropsTableBody: document.querySelector('#splan-props-table tbody'),
   splanConflicts: $('#splan-conflicts'),
   btnSplanClose: $('#btn-splan-close'),
+  // 道具连续离仓超时排查（只读）
+  btnAwayTimeout: $('#btn-away-timeout'),
+  awayDialog: $('#away-dialog'),
+  awayForm: $('#away-form'),
+  awayMinute: $('#away-minute'),
+  awayThreshold: $('#away-threshold'),
+  awayPanel: $('#away-panel'),
+  awayMinuteLabel: $('#away-minute-label'),
+  awayThresholdLabel: $('#away-threshold-label'),
+  awaySummary: $('#away-summary'),
+  awayTableBody: document.querySelector('#away-table tbody'),
+  awayUnd: $('#away-undeterminable'),
+  awayConflicts: $('#away-conflicts'),
+  btnAwayClose: $('#btn-away-close'),
   // 交接记录变更影响预演（只读）
   btnChangeImpact: $('#btn-change-impact'),
   impactDialog: $('#impact-dialog'),
@@ -656,6 +670,19 @@ function bindEvents() {
   els.splanPanel.addEventListener('click', (e) => {
     const link = e.target.closest?.('[data-sign-record]');
     if (link) openSignoffDialog(link.dataset.signRecord);
+  });
+
+  // 道具连续离仓超时排查（只读）
+  els.btnAwayTimeout.addEventListener('click', openAwayDialog);
+  els.awayForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitAwayTimeout();
+  });
+  els.btnAwayClose.addEventListener('click', () => els.awayPanel.classList.add('hidden'));
+  // 排查结果中的记录链接：定位到右下记录表
+  els.awayPanel.addEventListener('click', (e) => {
+    const link = e.target.closest?.('[data-record-id]');
+    if (link) locateRecord(link.dataset.recordId);
   });
 
   // 批量交接预演
@@ -1809,6 +1836,141 @@ async function submitSplan() {
     els.splanDialog.close();
     renderSplanResult(result);
     toast('补签计划已生成（只读，未改动任何数据）');
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+/* ==================== 道具连续离仓超时排查（只读） ==================== */
+
+const AWAY_STATUS_TEXT = {
+  CLOSED_TIMEOUT: { cls: 'inv-bad', text: '✕ 已归仓但离仓超时' },
+  OPEN_TIMEOUT: { cls: 'inv-bad', text: '✕ 未归仓且已超时' },
+  CONFIRMED_TIMEOUT: { cls: 'inv-bad', text: '✕ 确定超时（链冲突后无法判定）' },
+  UNDETERMINED: { cls: 'inv-warn', text: '？ 时长无法判定' },
+};
+
+function openAwayDialog() {
+  els.awayMinute.value = state.verification.endMinute || 0;
+  els.awayThreshold.value = 10;
+  els.awayDialog.showModal();
+}
+
+function awayRecordsHtml(records) {
+  if (!records.length) return '<span class="inv-dash">无</span>';
+  return records.map((r) =>
+    `<span class="away-rec">第${r.minute}分 ${esc(r.from)} → ${esc(r.to)} ` +
+    `<a data-record-id="${esc(r.id)}" title="在右下记录表中定位">${shortId(r.id)}</a></span>`
+  ).join('；');
+}
+
+function renderAwayResult(result) {
+  els.awayMinuteLabel.textContent = result.cutoffMinute;
+  els.awayThresholdLabel.textContent = result.threshold;
+
+  const s = result.summary;
+  const chips = [
+    [`超时区间 ${s.overdueCount} 个`, s.overdueCount > 0 ? 'chip-bad' : 'chip-ok'],
+    [`其中确定超时（冲突后无法判定） ${s.confirmedTimeoutCount} 个`, s.confirmedTimeoutCount > 0 ? 'chip-warn' : ''],
+    [`未归仓已超时 ${s.openTimeoutCount} 个`, s.openTimeoutCount > 0 ? 'chip-bad' : ''],
+    [`时长无法判定 ${s.undeterminableCount} 个`, s.undeterminableCount > 0 ? 'chip-warn' : ''],
+    [`未归仓未超时 ${s.openNonTimeoutCount} 个`, ''],
+    [`扫描离仓区间 ${s.scannedIntervals} 个`, 'chip-muted'],
+    [`链冲突道具 ${s.conflictPropCount} 件`, s.conflictPropCount > 0 ? 'chip-warn' : 'chip-muted'],
+  ];
+  els.awaySummary.innerHTML = chips
+    .map(([text, cls]) => `<span class="inv-chip ${cls}">${text}</span>`)
+    .join('');
+
+  if (result.overdueIntervals.length === 0) {
+    els.awayTableBody.innerHTML =
+      `<tr><td colspan="8" class="empty">截止第 ${result.cutoffMinute} 分钟，没有超过 ${result.threshold} 分钟的离仓区间（等于阈值不算超时）。</td></tr>`;
+  } else {
+    els.awayTableBody.innerHTML = result.overdueIntervals.map((iv, i) => {
+      const st = AWAY_STATUS_TEXT[iv.status] || { cls: '', text: iv.status };
+      const endLabel = iv.status === 'CONFIRMED_TIMEOUT'
+        ? `第${iv.endMinute}分（冲突前）`
+        : iv.open
+          ? `第${iv.endMinute}分（查询时刻，未归仓）`
+          : `第${iv.endMinute}分（重新入仓）`;
+      return `
+        <tr class="inv-row-CONFLICT">
+          <td class="cell-minute">${i + 1}</td>
+          <td><strong>${esc(iv.propName)}</strong></td>
+          <td><span class="inv-badge ${st.cls}">${st.text}</span></td>
+          <td class="cell-minute">第${iv.startMinute}分（仓库交出）</td>
+          <td class="cell-minute">${endLabel}</td>
+          <td class="cell-minute"><strong>${iv.duration}</strong> ＞ ${result.threshold}</td>
+          <td class="away-records">${awayRecordsHtml(iv.records)}</td>
+          <td class="inv-note">${esc(iv.note || '')}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  if (result.undeterminableIntervals.length === 0) {
+    els.awayUnd.innerHTML = '';
+  } else {
+    els.awayUnd.innerHTML = `
+      <div class="resp-und-head">？ 时长无法判定（${result.undeterminableIntervals.length} 个区间）：冲突前可确定时长未超过阈值，冲突当分钟及之后是否离仓 / 何时归仓无法判定</div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>道具</th><th>离仓起始</th><th>冲突前可确定时长</th><th>冲突分钟</th><th>关联交接记录</th><th>说明</th></tr></thead>
+          <tbody>${result.undeterminableIntervals.map((iv) => `
+            <tr class="inv-row-UNKNOWN">
+              <td><strong>${esc(iv.propName)}</strong></td>
+              <td class="cell-minute">第${iv.startMinute}分</td>
+              <td class="cell-minute">${iv.determinedDuration} 分钟（≤ ${iv.threshold}）</td>
+              <td class="cell-minute">第${iv.conflict.conflictMinute}分</td>
+              <td class="away-records">${awayRecordsHtml(iv.records)}</td>
+              <td class="inv-note">${esc(iv.note)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  if (result.conflicts.length === 0) {
+    els.awayConflicts.innerHTML = '';
+  } else {
+    els.awayConflicts.innerHTML = `
+      <div class="resp-section-title">排查窗内发生链冲突的道具（只保留冲突前可确定的区间）</div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>道具</th><th>冲突分钟</th><th>冲突类型</th><th>说明</th></tr></thead>
+          <tbody>${result.conflicts.map((c) => `
+            <tr class="inv-row-CONFLICT">
+              <td><strong>${esc(c.propName)}</strong></td>
+              <td class="cell-minute">第${c.conflictMinute}分</td>
+              <td>${c.conflictType === 'AMBIGUOUS' ? '多条可接续（链不唯一）' : '无法接续（断链）'}</td>
+              <td class="inv-note">${esc(c.reason)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  els.awayPanel.classList.remove('hidden');
+  els.awayPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function submitAwayTimeout() {
+  const minute = Number(els.awayMinute.value);
+  const threshold = Number(els.awayThreshold.value);
+  if (!Number.isInteger(minute) || minute < 0) {
+    toast('截止分钟必须是不小于 0 的整数', true);
+    return;
+  }
+  if (!Number.isInteger(threshold) || threshold < 0) {
+    toast('允许离仓分钟数必须是不小于 0 的整数', true);
+    return;
+  }
+  try {
+    const result = await api(
+      `/api/away-timeout?minute=${minute}&threshold=${threshold}`
+    );
+    els.awayDialog.close();
+    renderAwayResult(result);
+    toast('连续离仓超时排查完成（只读，未改动记录或签收）');
   } catch (err) {
     toast(err.message, true);
   }
