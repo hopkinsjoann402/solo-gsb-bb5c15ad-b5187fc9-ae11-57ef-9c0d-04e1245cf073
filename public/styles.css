@@ -696,6 +696,32 @@ main .btn:hover { background: var(--muted-bg); color: var(--ink); }
 .impact-reason-target { font-weight: 600; color: var(--error); }
 .impact-reason-prefix { color: var(--warn); }
 
+/* ---------- 道具连续离仓超时排查 ---------- */
+.panel-away { margin-bottom: 16px; }
+.away-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.away-head h2 span { color: var(--brand); }
+#away-table { margin-top: 8px; }
+.table tr.away-row-OVERDUE { background: var(--error-bg); }
+.table tr.away-row-OVERDUE:hover { background: #fae1df; }
+.away-recs { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.away-rec { color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 12px; white-space: nowrap; }
+.away-rec.away-rec-start { color: var(--error); font-weight: 700; }
+.away-rec.away-rec-end { font-weight: 700; }
+.away-open-end { color: var(--warn); font-weight: 600; }
+.away-duration-over { color: var(--error); font-weight: 700; }
+.away-und { padding: 0 18px; }
+.away-conflicts { padding: 0 18px 6px; }
+.away-und-card {
+  border: 1px dashed #e0a39d;
+  background: #fffafa;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.away-und-card .away-und-head { color: var(--error); font-weight: 700; margin-bottom: 3px; }
+.away-und-card a { color: var(--error); cursor: pointer; text-decoration: underline; }
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 980px) {
   .impact-grid { grid-template-columns: 1fr; }

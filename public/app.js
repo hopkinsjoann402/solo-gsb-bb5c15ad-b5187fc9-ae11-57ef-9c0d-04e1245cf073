@@ -163,6 +163,21 @@ const els = {
   impactSignoffTableBody: document.querySelector('#impact-signoff-table tbody'),
   impactGained: $('#impact-gained'),
   btnImpactClose: $('#btn-impact-close'),
+  // 道具连续离仓超时排查（只读）
+  btnAwayTimeout: $('#btn-away-timeout'),
+  awayDialog: $('#away-dialog'),
+  awayForm: $('#away-form'),
+  awayCutoff: $('#away-cutoff'),
+  awayLimit: $('#away-limit'),
+  awayPanel: $('#away-panel'),
+  awayCutoffLabel: $('#away-cutoff-label'),
+  awayLimitLabel: $('#away-limit-label'),
+  awaySummary: $('#away-summary'),
+  awayBannerOk: $('#away-banner-ok'),
+  awayTableBody: document.querySelector('#away-table tbody'),
+  awayUnd: $('#away-undeterminable'),
+  awayConflicts: $('#away-conflicts'),
+  btnAwayClose: $('#btn-away-close'),
 };
 
 const STATUS_TEXT = {
@@ -656,6 +671,19 @@ function bindEvents() {
   els.splanPanel.addEventListener('click', (e) => {
     const link = e.target.closest?.('[data-sign-record]');
     if (link) openSignoffDialog(link.dataset.signRecord);
+  });
+
+  // 道具连续离仓超时排查（只读）
+  els.btnAwayTimeout.addEventListener('click', openAwayDialog);
+  els.awayForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitAwayTimeout();
+  });
+  els.btnAwayClose.addEventListener('click', () => els.awayPanel.classList.add('hidden'));
+  // 确定区间 / 无法判定区间 / 冲突中的关联记录：定位右下记录表
+  els.awayPanel.addEventListener('click', (e) => {
+    const link = e.target.closest?.('[data-record-id]');
+    if (link) locateRecord(link.dataset.recordId);
   });
 
   // 批量交接预演
@@ -2137,6 +2165,170 @@ async function rerunImpact() {
     });
     renderImpactResult(result);
     toast('已按最新数据重新预演');
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+/* ==================== 道具连续离仓超时排查（只读） ==================== */
+
+const AWAY_STATUS_TEXT = {
+  RETURNED: { cls: 'inv-badge inv-ok', text: '✓ 已归仓 · 未超时' },
+  RETURNED_TIMEOUT: { cls: 'inv-badge inv-bad', text: '✕ 已归仓 · 离仓超时' },
+  OPEN: { cls: 'inv-badge inv-warn', text: '⏳ 未归仓 · 暂未超时' },
+  OPEN_TIMEOUT: { cls: 'inv-badge inv-bad', text: '✕ 未归仓 · 确定超时' },
+};
+
+function openAwayDialog() {
+  if (state.props.length === 0) {
+    toast('请先录入道具，再排查连续离仓超时', true);
+    return;
+  }
+  els.awayCutoff.value = state.verification.endMinute || 0;
+  els.awayLimit.value = 5;
+  els.awayDialog.showModal();
+  els.awayCutoff.focus();
+}
+
+function awayRecordLinks(iv) {
+  return `<span class="away-recs">${iv.records.map((r) => {
+    const cls =
+      iv.startRecord && r.id === iv.startRecord.id ? 'away-rec away-rec-start'
+      : iv.endRecord && r.id === iv.endRecord.id ? 'away-rec away-rec-end'
+      : 'away-rec';
+    const tag =
+      iv.startRecord && r.id === iv.startRecord.id ? '出仓'
+      : iv.endRecord && r.id === iv.endRecord.id ? '归仓'
+      : `第${r.minute}分`;
+    return `<a class="${cls}" data-record-id="${esc(r.id)}" title="第${r.minute}分钟 ${esc(r.from)} → ${esc(r.to)}（在右下记录表中定位）">${tag} ${shortId(r.id)}</a>`;
+  }).join('')}</span>`;
+}
+
+function awayIntervalRow(iv, idx) {
+  const overdue = !!iv.overdue;
+  const st = AWAY_STATUS_TEXT[iv.status] || { cls: 'inv-badge', text: iv.status };
+  const endCell = iv.closed
+    ? `第${iv.endMinute}分`
+    : `<span class="away-open-end">未归仓（截至第${iv.asOfMinute}分）</span>`;
+  const duration = iv.duration;
+  const durCell = overdue
+    ? `<span class="away-duration-over">${duration} 分钟（超 ${duration - iv.limit}）</span>`
+    : `${duration} 分钟`;
+  return `
+    <tr class="${overdue ? 'away-row-OVERDUE' : ''}">
+      <td class="cell-minute">${idx + 1}</td>
+      <td><strong>${esc(iv.propName)}</strong></td>
+      <td class="cell-minute">第${iv.startMinute}分</td>
+      <td class="cell-minute">${endCell}</td>
+      <td class="cell-minute">${durCell}</td>
+      <td class="cell-minute">${iv.limit}</td>
+      <td><span class="${st.cls}">${st.text}</span>${iv.confirmedOverdueBeforeConflict ? '<br><span class="inv-note">冲突前已确定超时，冲突后无法判定</span>' : ''}</td>
+      <td>${awayRecordLinks(iv)}</td>
+      <td class="inv-note">${esc(iv.note)}</td>
+    </tr>`;
+}
+
+function awayConflictLinks(conflict) {
+  const ids = (conflict.records || []);
+  if (!ids.length) return '<span class="inv-dash">—</span>';
+  return ids
+    .map((id) => `<a class="resp-rec-link" data-record-id="${esc(id)}" title="在右下记录表中定位">记录 ${shortId(id)}</a>`)
+    .join('、');
+}
+
+function renderAwayResult(result) {
+  els.awayCutoffLabel.textContent = result.cutoffMinute;
+  els.awayLimitLabel.textContent = result.limit;
+
+  const chips = [
+    [`确定区间 ${result.totalIntervals} 个`, ''],
+    [`确定超时 ${result.overdueIntervals} 个`, result.overdueIntervals > 0 ? 'chip-bad' : 'chip-ok'],
+    [`链冲突道具 ${result.conflictPropCount} 件`, result.conflictPropCount > 0 ? 'chip-warn' : ''],
+    [`无法判定区间 ${result.undeterminableCount} 个`, result.undeterminableCount > 0 ? 'chip-warn' : ''],
+    [`道具 ${result.totalProps} 件`, 'chip-muted'],
+  ];
+  els.awaySummary.innerHTML = chips
+    .map(([text, cls]) => `<span class="inv-chip ${cls}">${text}</span>`)
+    .join('');
+
+  els.awayBannerOk.classList.toggle('hidden', result.overdueIntervals > 0);
+
+  const rows = result.props.flatMap((p) => [
+    ...p.intervals,
+    ...(p.openInterval ? [p.openInterval] : []),
+  ]);
+  els.awayTableBody.innerHTML = rows.length
+    ? rows.map((iv, i) => awayIntervalRow(iv, i)).join('')
+    : '<tr><td colspan="9" class="empty">截止时刻内没有确定的离仓区间（道具均在仓库，或链冲突前未曾离仓）</td></tr>';
+
+  // 无法判定区间（冲突时仍在仓外、冲突前时长未越过阈值）
+  if (result.undeterminable.length === 0) {
+    els.awayUnd.innerHTML = '';
+  } else {
+    els.awayUnd.innerHTML = `
+      <div class="resp-section-title">无法判定的离仓区间（${result.undeterminable.length} 个：冲突前未越过阈值，冲突后是否归仓 / 总时长均无法判定）</div>
+      ${result.undeterminable.map((u) => `
+        <div class="away-und-card">
+          <div class="away-und-head">？ ${esc(u.propName)}：自第${u.startMinute}分钟离仓，第${u.conflict.minute}分钟链冲突后无法判定
+            （冲突前已确定离仓 ${u.durationBeforeConflict} 分钟，阈值 ${u.limit} 分钟）</div>
+          <div class="inv-note">${esc(u.note)}</div>
+          <div style="margin-top:4px">出仓记录：
+            <a class="resp-rec-link" data-record-id="${esc(u.startRecord.id)}" title="在右下记录表中定位">记录 ${shortId(u.startRecord.id)}</a>
+            （第${u.startRecord.minute}分钟 ${esc(u.startRecord.from)} → ${esc(u.startRecord.to)}）；
+            冲突定位记录：${awayConflictLinks(u.conflict)}</div>
+        </div>`).join('')}`;
+  }
+
+  // 冲突时已在仓库 / 冲突前区间均已闭合的道具：仅提示冲突，没有无法判定区间
+  const conflictOnly = result.props.filter(
+    (p) => p.conflict && !p.undeterminableInterval &&
+      !(p.openInterval && p.openInterval.confirmedOverdueBeforeConflict)
+  );
+  if (conflictOnly.length === 0) {
+    els.awayConflicts.innerHTML = '';
+  } else {
+    els.awayConflicts.innerHTML = `
+      <div class="resp-section-title">存在链冲突的道具（冲突分钟之后的记录不作为确定持有）</div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>道具</th><th>冲突分钟</th><th>冲突类型</th><th>定位记录</th><th>说明</th></tr></thead>
+          <tbody>${conflictOnly.map((p) => `
+            <tr class="inv-row-UNKNOWN">
+              <td><strong>${esc(p.propName)}</strong></td>
+              <td class="cell-minute">第${p.conflict.minute}分</td>
+              <td>${p.conflict.type === 'AMBIGUOUS' ? '多条可接续（链不唯一）' : '无法接续（断链）'}</td>
+              <td>${awayConflictLinks(p.conflict)}</td>
+              <td class="inv-note">${esc(p.conflict.reason)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  els.awayPanel.classList.remove('hidden');
+  els.awayPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function submitAwayTimeout() {
+  const minute = Number(els.awayCutoff.value);
+  const limit = Number(els.awayLimit.value);
+  if (!Number.isInteger(minute) || minute < 0) {
+    toast('截止分钟必须是不小于 0 的整数', true);
+    return;
+  }
+  if (!Number.isInteger(limit) || limit < 0) {
+    toast('允许离仓分钟数必须是不小于 0 的整数', true);
+    return;
+  }
+  try {
+    const result = await api(`/api/away-timeout?minute=${minute}&limit=${limit}`);
+    els.awayDialog.close();
+    renderAwayResult(result);
+    toast(
+      result.overdueIntervals > 0
+        ? `排查完成：发现 ${result.overdueIntervals} 个确定超时区间（只读，未改动数据）`
+        : '排查完成：没有确定超时区间（只读，未改动数据）'
+    );
   } catch (err) {
     toast(err.message, true);
   }

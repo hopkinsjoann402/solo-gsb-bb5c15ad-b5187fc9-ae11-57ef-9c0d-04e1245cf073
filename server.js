@@ -19,6 +19,7 @@ const {
   verifiedChain,
 } = require('./src/signoff');
 const { buildSignoffPlan, MAX_BUDGET } = require('./src/signoff-plan');
+const { checkAwayTimeouts } = require('./src/away-timeout');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -402,6 +403,28 @@ app.get('/api/signoff-plan', (req, res) => {
 
   // 纯读取 + 即时重放规划，不写入任何数据；实际签收后由页面重新查询计算
   res.json(buildSignoffPlan(store.getData(), minute, budget));
+});
+
+/* ---------------- 道具连续离仓超时排查（只读，即时重放，不改写记录或签收） ---------------- */
+
+app.get('/api/away-timeout', (req, res) => {
+  let minute;
+  let limit;
+  try {
+    minute = parseMinute(req.query.minute, '截止分钟');
+    if (req.query.limit === undefined || req.query.limit === null || req.query.limit === '') {
+      throw new Error('允许离仓分钟数不能为空');
+    }
+    limit = Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new Error('允许离仓分钟数必须是不小于 0 的整数（分钟）');
+    }
+  } catch (err) {
+    return badRequest(res, err.message);
+  }
+
+  // 纯读取 + 即时重放，不写入任何交接记录或签收
+  res.json(checkAwayTimeouts(store.getData(), minute, limit));
 });
 
 /* ---------------- 批量交接预演（预演不落盘，提交一次写入） ---------------- */
